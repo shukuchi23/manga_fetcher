@@ -1,19 +1,25 @@
 <div align="center">
 
-# 📚 manga_fetcher
+# manga_fetcher
+
+
 
 <p align="center">
   <img src="https://img.shields.io/badge/Python-3.7+-blue.svg" alt="Python 3.7+">
   <img src="https://img.shields.io/badge/Platform-Windows%20%7C%20Linux-lightgrey.svg" alt="Platform">
 </p>
+</dev>
 
+<div align="left">
 
-## 📖 Описание
+  ## 📖 Описание
 
 Python-скрипт для автоматического скачивания манги с сайта **com-x.life** и **im.manga-chan.me**. 
 
 ---
 
+<dev align="left">
+  
 ## 🔧 Установка
 
 ### Требования
@@ -64,14 +70,15 @@ playwright.exe install firefox
 python main.py
 ```
 
+
 ### Первый запуск
 
 1. **Выберите браузер** (Chrome/Firefox)
 2. **Авторизуйтесь** на сайте com-x.life в открывшемся окне браузера
 3. **Дождитесь автоматического сохранения cookies** — скрипт продолжит работу автоматически
 
-> ⚠️ **Важно!** Авторизация требуется только при первом запуске. Cookies сохраняются в файл `comx_cookies.json`
+> ⚠️ **Важно!** Авторизация требуется только при первом запуске. Cookies сохраняются в файл `browser-state.json`
 
-<div align="center">
 
 </div>
+
