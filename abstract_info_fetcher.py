@@ -73,7 +73,7 @@ class AbstractInfoFetcher:
                 return True
             except requests.exceptions.RequestException as e:
                 print(f"Произошла ошибка при скачивании: {e}")
-                return False;
+                return False
             except Exception as e:
                 print(f'[{output_filename}]Неожиданная ошибка: попытка скачать  {try_count + 1}')
                 if not self.download(session, download_url, output_filename, try_count + 1) and try_count == 0:

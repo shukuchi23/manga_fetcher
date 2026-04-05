@@ -177,8 +177,9 @@ def download_list(fetcher: AbstractInfoFetcher, download_url: list[str], output_
             session.close()
 
 
-def get_threads(size: int, fetcher: AbstractInfoFetcher, download_links: list[str], names: list[str]):
+def get_threads(fetcher: AbstractInfoFetcher, download_links: list[str], names: list[str]):
     rez = []
+    size = len(download_links)
     if size < 8:
         for i in range(size):
             thread_name = f"Thread{i}"
@@ -198,14 +199,46 @@ def get_threads(size: int, fetcher: AbstractInfoFetcher, download_links: list[st
     return rez
 
 
+def extract_num(line: str):
+    index = line.index(".")
+    num = line[6:index]
+    return num
+
+
+def filter_exists(folder_prefix: str, chapter_names: list[str], download_links: list[str]):
+    remove_ids = []
+
+    listdir =  {file for file in  os.listdir(folder_prefix)}
+    listdir = {extract_num(x): os.path.getsize(f'{"/".join(pathlib.Path(folder_prefix).parts)}/{x}') for x in listdir}
+    remove_chapters = []
+    remove_links = []
+    for i, chapter_name in enumerate(chapter_names):
+        finded_chapter = extract_num(chapter_name[chapter_name.index("Глава "):])
+        if finded_chapter not in listdir or listdir[finded_chapter] < 8192:
+            print(f"Найдена новая  манга: {chapter_name}")
+        else:
+            remove_chapters.append(chapter_name)
+            remove_links.append(download_links[i])
+    for remove_chapter in remove_chapters:
+        chapter_names.remove(remove_chapter)
+    for remove_link in remove_links:
+        download_links.remove(remove_link)
+
+
+
 def download_manga(folder_prefix: str, fetcher: AbstractInfoFetcher, download_manga_url: str, title_name: str):
     chapter_names = get_chapters(title_name)
     # chapter_names = get_pretty_chapter_names(folder_prefix=folder_prefix, url=f"{manga_hub_chapter_url}/chapters")
     download_links = fetcher.get_download_links(download_manga_url)
     if folder_prefix:
         chapter_names = [os.path.join(folder_prefix, x) for x in chapter_names]
-    print("[Данные о главах]")
     link_count = len(download_links)
+    filter_exists(folder_prefix, chapter_names, download_links)
+    if len(download_links) == 0 and len(download_links) != link_count:
+        print(f"Манга '{title_name} полностью скачана'")
+        return None
+
+    print("[Данные о главах]")
     chapters_count = len(chapter_names)
     if chapters_count == 0 or link_count == 0:
         sys.stderr.writelines("Что-то не так...")
@@ -226,7 +259,7 @@ def download_manga(folder_prefix: str, fetcher: AbstractInfoFetcher, download_ma
     for chapter_name in chapter_names:
         print(chapter_name)
 
-    threads: list[Thread] = get_threads(fetcher=fetcher, size=link_count, download_links=download_links,
+    threads: list[Thread] = get_threads(fetcher=fetcher, download_links=download_links,
                                         names=chapter_names)
     thread_count = len(threads)
     for t in threads:
@@ -282,5 +315,4 @@ if __name__ == '__main__':
 
     folder = os.path.join(".", "downloads", prepare_name(title_name))
     os.makedirs(name=folder, exist_ok=True)
-    download_manga(folder_prefix=str(folder), fetcher=cur_fetcher, download_manga_url=download_url,
-                   title_name=title_name)
+    download_manga(folder_prefix=str(folder), fetcher=cur_fetcher, download_manga_url=download_url, title_name=title_name)
