@@ -2,58 +2,26 @@ import os
 import pathlib
 import re
 import sys
-import threading
-import time
-from threading import Thread, Lock
+from threading import Thread
 
 import requests
 from bs4 import BeautifulSoup
+from rich.progress import Progress, TaskID
 
 from abstract_info_fetcher import AbstractInfoFetcher, MangaChanInfoFetcher, \
     ComXLifeInfoFetcher
 from chapter_fetcher import get_chapters
 
 chapter_fetcher_name = "a.zazaza.me"
-progres_bar = {}
-progres_bar_lock = Lock()
 
 
-def cursor_up(count):
-    print(f"\x1b[{count}F", end="")
-
-
-def cursor_down(count):
-    print(f"\x1b[{count}E", end="")
-
-
-def cursor_right(count):
-    print(f"\x1b[{count}C", end="")
-
-
-def print_progress_bar():
-    progres_bar_lock.acquire()
-    print("".join([f"{a}\t:{b[0]}\\{b[1]}\n" for a, b in progres_bar.items()]), end="", flush=True)
-    progres_bar_lock.release()
-
-
-# def find_manga_hub_url(title_name: str):
-#     soup = BeautifulSoup(
-#         requests.get(f"{mhub_base_url}/suggestions", params={"type": "title", "query": title_name}).text, "html.parser")
-#     find = soup.find("a")
-#     if find:
-#         href_ = find.attrs['href']
-#         print(f"MANGA_HUB: найдено {href_}")
-#         return f"{mhub_base_url}{href_}"
-#     else:
-#         sys.stderr.write("Не удалось найти мангу на MANGA_HUB")
-#
 def extract_ru_title(fetcher: AbstractInfoFetcher, title_name: str):
     if isinstance(fetcher, ComXLifeInfoFetcher) or isinstance(fetcher, MangaChanInfoFetcher):
         if title_name.count("(") > 0:
             title_name = title_name[title_name.index("(") + 1:title_name.index(")")]
         elif title_name.count("/") > 0:
             title_name = title_name.split("/", maxsplit=2)[1]
-    return title_name
+    return title_name.strip()
 
 
 def search_mode(fetcher: AbstractInfoFetcher, title_name: str) -> tuple:
@@ -163,39 +131,59 @@ def get_pretty_chapter_names(url: str, folder_prefix: str = ""):
     return rez
 
 
-def download_list(fetcher: AbstractInfoFetcher, download_url: list[str], output_filenames: list[str]):
+def download_list(fetcher: AbstractInfoFetcher, progress_bar: Progress, increase_fun, download_url: list[str],
+                  output_filenames: list[str], p_tasks: list[TaskID]):
     session = fetcher.get_download_session()
     try:
-        thread_name = threading.current_thread().name
         for i, url in enumerate(download_url):
-            fetcher.download(session=session, download_url=url, output_filename=output_filenames[i])
-            progres_bar_lock.acquire()
-            progres_bar[thread_name][0] += 1
-            progres_bar_lock.release()
+            task_id = p_tasks[i]
+            fetcher.download(session=session, download_url=url, output_filename=output_filenames[i],
+                             progress_bar=progress_bar,
+                             task=task_id)
+            progress_bar.update(task_id, visible=False)
+            increase_fun()
+
     finally:
         if session:
             session.close()
 
 
-def get_threads(fetcher: AbstractInfoFetcher, download_links: list[str], names: list[str]):
+def get_threads(fetcher: AbstractInfoFetcher, progress_bar: Progress, download_links: list[str],
+                output_filenames: list[str], pure_chapter_names: list[str]):
     rez = []
     size = len(download_links)
+    task = progress_bar.add_task("Скачивание...", total=size)
+
+    def increase_shared_progress_bar_func():
+        progress_bar.advance(task, 1)
+
     if size < 8:
         for i in range(size):
-            thread_name = f"Thread{i}"
-            progres_bar[thread_name] = [0, 1]
-            rez.append(Thread(name=thread_name, target=download_list, args=(fetcher, [download_links[i]], [names[i]])))
+            rez.append(Thread(name=f"Thread{i}", target=download_list,
+                              args=(fetcher, progress_bar, increase_shared_progress_bar_func, [download_links[i]],
+                                    [output_filenames[i]], [
+                                        progress_bar.add_task(description=pure_chapter_names[i], start=False,
+                                                              visible=False)])))
     else:
         ids_lst = [[] for _ in range(8)]
-        names_lst = [[] for _ in range(8)]
+        output_filenames_lst = [[] for _ in range(8)]
+        pure_chapter_names_lst = [[] for _ in range(8)]
+        tasks = [[] for _ in range(8)]
         for i, e in enumerate(download_links):
             ids_lst[i % 8].append(e)
-            names_lst[i % 8].append(names[i])
-        for i in range(8):
-            thread_name = f"Thread{i}"
-            progres_bar[thread_name] = [0, len(ids_lst[i])]
-            rez.append(Thread(name=thread_name, target=download_list, args=(fetcher, ids_lst[i], names_lst[i])))
+            output_filenames_lst[i % 8].append(output_filenames[i])
+            pure_chapter_names_lst[i % 8].append(pure_chapter_names[i])
+            tasks[i % 8].append(progress_bar.add_task(description=pure_chapter_names[i], start=False, visible=False))
 
+        for i in range(8):
+            rez.append(
+                Thread(name=f"Thread{i}", target=download_list,
+                       args=(
+                           fetcher, progress_bar, increase_shared_progress_bar_func, ids_lst[i],
+                           output_filenames_lst[i],
+                           tasks[i])))
+
+    progress_bar.start_task(task)
     return rez
 
 
@@ -205,63 +193,65 @@ def extract_num(line: str):
     return num
 
 
-def filter_exists(folder_prefix: str, chapter_names: list[str], download_links: list[str]):
-    remove_ids = []
-
-    listdir =  {file for file in  os.listdir(folder_prefix)}
+def filter_exists(folder_prefix: str, chapter_names: list[str], pure_chapter_names: list[str],
+                  download_links: list[str]):
+    listdir = {file for file in os.listdir(folder_prefix)}
     listdir = {extract_num(x): os.path.getsize(f'{"/".join(pathlib.Path(folder_prefix).parts)}/{x}') for x in listdir}
     remove_chapters = []
     remove_links = []
+    remove_pure_chapter_names = []
+    need_print_new_chapter_manga = len(listdir) > 0
     for i, chapter_name in enumerate(chapter_names):
         finded_chapter = extract_num(chapter_name[chapter_name.index("Глава "):])
         if finded_chapter not in listdir or listdir[finded_chapter] < 8192:
-            print(f"Найдена новая  манга: {chapter_name}")
+            if need_print_new_chapter_manga:
+                print(f"Найдена новая  манга: {pure_chapter_names[i]}")
         else:
             remove_chapters.append(chapter_name)
             remove_links.append(download_links[i])
+            remove_pure_chapter_names.append(pure_chapter_names[i])
     for remove_chapter in remove_chapters:
         chapter_names.remove(remove_chapter)
     for remove_link in remove_links:
         download_links.remove(remove_link)
+    for remove_link in remove_pure_chapter_names:
+        pure_chapter_names.remove(remove_link)
 
 
-
-def download_manga(folder_prefix: str, fetcher: AbstractInfoFetcher, download_manga_url: str, title_name: str):
-    chapter_names = get_chapters(title_name)
-    # chapter_names = get_pretty_chapter_names(folder_prefix=folder_prefix, url=f"{manga_hub_chapter_url}/chapters")
+def download_manga(folder_prefix: str, progress_bar: Progress, fetcher: AbstractInfoFetcher, download_manga_url: str,
+                   title_name: str):
+    pure_chapter_names = get_chapters(title_name)
     download_links = fetcher.get_download_links(download_manga_url)
+    output_filenames = None
     if folder_prefix:
-        chapter_names = [os.path.join(folder_prefix, x) for x in chapter_names]
+        output_filenames = [os.path.join(folder_prefix, x) for x in pure_chapter_names]
     link_count = len(download_links)
-    filter_exists(folder_prefix, chapter_names, download_links)
+    filter_exists(folder_prefix=folder_prefix, chapter_names=output_filenames, pure_chapter_names=pure_chapter_names,
+                  download_links=download_links)
     if len(download_links) == 0 and len(download_links) != link_count:
         print(f"Манга '{title_name} полностью скачана'")
         return None
 
     print("[Данные о главах]")
-    chapters_count = len(chapter_names)
+    chapters_count = len(output_filenames)
     if chapters_count == 0 or link_count == 0:
         sys.stderr.writelines("Что-то не так...")
         print(f"\tНайдено в {chapter_fetcher_name} = {chapters_count}")
-        print(f"\nНайдено в {fetcher.name} = {link_count}")
+        print(f"\tНайдено в {fetcher.name} = {link_count}")
         exit(1)
     elif chapters_count != link_count:
         min_size = min(chapters_count, link_count)
-        print(f"\tНайдено в {chapter_fetcher_name} = {len(chapter_names)}")
-        print(f"\nНайдено в {fetcher.name} = {link_count}")
-        print(f"Будет скачано минимально возможное кол.-во глав: {min_size}")
-        chapter_names = chapter_names[:min_size]
+        print(f"\tНайдено в {chapter_fetcher_name} = {len(output_filenames)}")
+        print(f"\tНайдено в {fetcher.name} = {link_count}")
+        # print(f"Будет скачано минимально возможное кол.-во глав: {min_size}")
+        output_filenames = output_filenames[:min_size]
         download_links = download_links[:min_size]
     else:
-        print(f"\tНайдено в manga_hub = {len(chapter_names)}")
-        print(f"\nНайдено в {fetcher.name} = {link_count}")
+        print(f"\tНайдено в manga_hub = {len(output_filenames)}")
+        print(f"\tНайдено в {fetcher.name} = {link_count}")
 
-    for chapter_name in chapter_names:
-        print(chapter_name)
-
-    threads: list[Thread] = get_threads(fetcher=fetcher, download_links=download_links,
-                                        names=chapter_names)
-    thread_count = len(threads)
+    threads: list[Thread] = get_threads(fetcher=fetcher, progress_bar=progress_bar, download_links=download_links,
+                                        output_filenames=output_filenames, pure_chapter_names=pure_chapter_names)
     for t in threads:
         t.start()
 
@@ -274,18 +264,10 @@ def download_manga(folder_prefix: str, fetcher: AbstractInfoFetcher, download_ma
                 break
         if t:
             fl = False
-        else:
-            print_progress_bar()
-            print("Загрузка ", end="", flush=True)
-            for i in range(4):
-                print(".", end="", flush=True)
-                time.sleep(1)
-            cursor_up(thread_count)
-    cursor_down(thread_count + 1)
 
 
 if __name__ == '__main__':
-    fetchers: list[AbstractInfoFetcher] = [MangaChanInfoFetcher(), ComXLifeInfoFetcher()]
+    fetchers: list[AbstractInfoFetcher] = [ComXLifeInfoFetcher(), MangaChanInfoFetcher()]
 
     argv_ = sys.argv
     cur_fetcher = None
@@ -315,4 +297,6 @@ if __name__ == '__main__':
 
     folder = os.path.join(".", "downloads", prepare_name(title_name))
     os.makedirs(name=folder, exist_ok=True)
-    download_manga(folder_prefix=str(folder), fetcher=cur_fetcher, download_manga_url=download_url, title_name=title_name)
+    with Progress(expand=True) as p:
+        download_manga(folder_prefix=str(folder), progress_bar=p, fetcher=cur_fetcher, download_manga_url=download_url,
+                       title_name=title_name)

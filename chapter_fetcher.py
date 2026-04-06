@@ -18,7 +18,7 @@ def clone_and_update_header(header: dict, update_data: dict):
 
 
 # отсюда попадаем на реальный сайт
-def find_zazaza_url(title_name:str) -> str:
+def find_zazaza_url(title_name: str) -> str:
     header = clone_and_update_header(base_header, {
         "Content-Type": "application/x-www-form-urlencoded",
         "Origin": zazaza_base_url,
@@ -34,14 +34,14 @@ def find_zazaza_url(title_name:str) -> str:
         rez_lst: list[dict] = search.json()["suggestions"]
         lst_ = rez_lst[0]
         finded_name = lst_['value']
-        print(f'На сайте {zazaza_base_url} найдена информация о манге: "{finded_name}"')
+        # print(f'На сайте {zazaza_base_url} найдена информация о манге: "{finded_name}"')
         link_: str = lst_['link']
         rez_link = ""
         if link_.startswith("http"):
             rez_link = link_
         else:
             rez_link = f'{zazaza_base_url}{link_}'
-        print(f"Ссылка на сайт с главами: {rez_link}")
+        # print(f"Ссылка на сайт с главами: {rez_link}")
         return rez_link
 
 
@@ -57,7 +57,7 @@ def numerate_chapters(chapters: list[str]):
         i += 1
         p = p * 10
 
-    return [f'Глава {j:0{i+1}}.{r}' for j, r in enumerate(chapters)]
+    return [f'Глава {j:0{i + 1}}.{r}' for j, r in enumerate(chapters)]
 
 
 def parse_chapters(url):

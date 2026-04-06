@@ -5,6 +5,7 @@ import re
 
 import requests
 from bs4 import BeautifulSoup
+from rich.progress import Progress, TaskID
 
 import fucked_up_security
 
@@ -59,33 +60,43 @@ class AbstractInfoFetcher:
     def get_download_session(self):
         pass
 
-    def get_download_response_and_file_ext(self, session: requests.Session, download_url: str) -> tuple:
+    def get_download_response_and_file_ext(self, session: requests.Session, download_url: str) -> tuple[
+        requests.Response, str]:
         pass
 
-    def download(self, session: requests.Session, download_url: str, output_filename: str, try_count=0) -> bool:
-        if try_count < download_try_limit:
-            try:
-                response, ext = self.get_download_response_and_file_ext(session=session, download_url=download_url)
-                ext = ext if ext else ".zip"
-                with open(f'{output_filename}{ext}', "wb") as file:
-                    for chunk in response.iter_content(8192):
-                        file.write(chunk)
-                return True
-            except requests.exceptions.RequestException as e:
-                print(f"Произошла ошибка при скачивании: {e}")
-                return False
-            except Exception as e:
+    def download(self, session: requests.Session, download_url: str, output_filename: str, progress_bar: Progress,
+                 try_count=0, task: TaskID = None) -> bool:
+        if try_count >= download_try_limit:
+            return False
+        try:
+            response, ext = self.get_download_response_and_file_ext(session=session, download_url=download_url)
+            file_len = int(response.headers["Content-Length"])
+            if try_count == 0:
+                progress_bar.update(task_id=task, visible=True, total=file_len)
+                progress_bar.start_task(task)
+            ext = ext if ext else ".zip"
+            with open(f'{output_filename}{ext}', "wb") as file:
+                for chunk in response.iter_content(8192):
+                    file.write(chunk)
+                    progress_bar.advance(task, len(chunk))
+            return True
+        except requests.exceptions.RequestException as e:
+            print(f"Произошла ошибка при скачивании: {e}")
+            progress_bar.stop_task(task)
+            return False
+        except Exception as e:
+            if try_count == 0:
                 print(f'[{output_filename}]Неожиданная ошибка: попытка скачать  {try_count + 1}')
-                if not self.download(session, download_url, output_filename, try_count + 1) and try_count == 0:
+            if not self.download(session, download_url, output_filename, try_count + 1):
+                if try_count == 0:
                     import traceback
                     print(f"[{output_filename}] Неожиданная ошибка: {e}")
                     traceback.print_exc()
+                    progress_bar.stop_task(task)
                     return False
-                else:
-                    print(f'[{output_filename}] - успешно скачан')
-                    return True
-        else:
-            return False
+            elif try_count == 0:
+                print(f'[{output_filename}] - успешно скачан')
+                return True
 
 
 class MangaChanInfoFetcher(AbstractInfoFetcher):
