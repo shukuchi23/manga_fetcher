@@ -87,16 +87,19 @@ class AbstractInfoFetcher:
         except Exception as e:
             if try_count == 0:
                 print(f'[{output_filename}]Неожиданная ошибка: попытка скачать  {try_count + 1}')
-            if not self.download(session, download_url, output_filename, try_count + 1):
+            if not self.download(session=session, download_url=download_url, output_filename=output_filename,
+                                 try_count=try_count + 1, task=task, progress_bar=progress_bar):
                 if try_count == 0:
                     import traceback
                     print(f"[{output_filename}] Неожиданная ошибка: {e}")
                     traceback.print_exc()
                     progress_bar.stop_task(task)
                     return False
+                return False
             elif try_count == 0:
                 print(f'[{output_filename}] - успешно скачан')
                 return True
+            return False
 
 
 class MangaChanInfoFetcher(AbstractInfoFetcher):

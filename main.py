@@ -224,7 +224,7 @@ def download_manga(folder_prefix: str, progress_bar: Progress, fetcher: Abstract
     download_links = fetcher.get_download_links(download_manga_url)
     output_filenames = None
     if folder_prefix:
-        output_filenames = [os.path.join(folder_prefix, x) for x in pure_chapter_names]
+        output_filenames = [os.path.join(folder_prefix, prepare_name(x)) for x in pure_chapter_names]
     link_count = len(download_links)
     filter_exists(folder_prefix=folder_prefix, chapter_names=output_filenames, pure_chapter_names=pure_chapter_names,
                   download_links=download_links)
@@ -264,6 +264,7 @@ def download_manga(folder_prefix: str, progress_bar: Progress, fetcher: Abstract
                 break
         if t:
             fl = False
+    return None
 
 
 if __name__ == '__main__':
