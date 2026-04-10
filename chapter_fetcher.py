@@ -75,7 +75,10 @@ def parse_chapters(url):
     return rez
 
 
-def get_chapters(title_name):
+def get_chapters(title_name, dirty_len: int):
     url = find_zazaza_url(title_name)
     chapters = parse_chapters(url)
+    dif = dirty_len - len(chapters)
+    if dif > 0:
+        chapters.extend(['untitled'] * dif)
     return numerate_chapters(chapters)

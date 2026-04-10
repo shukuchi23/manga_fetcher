@@ -3,6 +3,7 @@ import pathlib
 import re
 import sys
 from threading import Thread
+from zipfile import ZipFile
 
 import requests
 from bs4 import BeautifulSoup
@@ -132,14 +133,15 @@ def get_pretty_chapter_names(url: str, folder_prefix: str = ""):
 
 
 def download_list(fetcher: AbstractInfoFetcher, progress_bar: Progress, increase_fun, download_url: list[str],
-                  output_filenames: list[str], p_tasks: list[TaskID]):
+                  output_filenames: list[str], p_tasks: list[TaskID], err_list: list[str]):
     session = fetcher.get_download_session()
     try:
         for i, url in enumerate(download_url):
             task_id = p_tasks[i]
-            fetcher.download(session=session, download_url=url, output_filename=output_filenames[i],
-                             progress_bar=progress_bar,
-                             task=task_id)
+            if not fetcher.download(session=session, download_url=url, output_filename=output_filenames[i],
+                                    progress_bar=progress_bar,
+                                    task=task_id):
+                err_list.append(url)
             progress_bar.update(task_id, visible=False)
             increase_fun()
 
@@ -149,7 +151,7 @@ def download_list(fetcher: AbstractInfoFetcher, progress_bar: Progress, increase
 
 
 def get_threads(fetcher: AbstractInfoFetcher, progress_bar: Progress, download_links: list[str],
-                output_filenames: list[str], pure_chapter_names: list[str]):
+                output_filenames: list[str], pure_chapter_names: list[str], er_lst: list[str]):
     rez = []
     size = len(download_links)
     task = progress_bar.add_task("Скачивание...", total=size)
@@ -163,7 +165,7 @@ def get_threads(fetcher: AbstractInfoFetcher, progress_bar: Progress, download_l
                               args=(fetcher, progress_bar, increase_shared_progress_bar_func, [download_links[i]],
                                     [output_filenames[i]], [
                                         progress_bar.add_task(description=pure_chapter_names[i], start=False,
-                                                              visible=False)])))
+                                                              visible=False)], er_lst)))
     else:
         ids_lst = [[] for _ in range(8)]
         output_filenames_lst = [[] for _ in range(8)]
@@ -181,7 +183,7 @@ def get_threads(fetcher: AbstractInfoFetcher, progress_bar: Progress, download_l
                        args=(
                            fetcher, progress_bar, increase_shared_progress_bar_func, ids_lst[i],
                            output_filenames_lst[i],
-                           tasks[i])))
+                           tasks[i], er_lst)))
 
     progress_bar.start_task(task)
     return rez
@@ -220,8 +222,8 @@ def filter_exists(folder_prefix: str, chapter_names: list[str], pure_chapter_nam
 
 def download_manga(folder_prefix: str, progress_bar: Progress, fetcher: AbstractInfoFetcher, download_manga_url: str,
                    title_name: str):
-    pure_chapter_names = get_chapters(title_name)
-    download_links = fetcher.get_download_links(download_manga_url)
+    download_links = fetcher.get_download_links(title_url=download_manga_url)
+    pure_chapter_names = get_chapters(title_name=title_name, dirty_len=len(download_links))
     output_filenames = None
     if folder_prefix:
         output_filenames = [os.path.join(folder_prefix, prepare_name(x)) for x in pure_chapter_names]
@@ -249,9 +251,10 @@ def download_manga(folder_prefix: str, progress_bar: Progress, fetcher: Abstract
     else:
         print(f"\tНайдено в manga_hub = {len(output_filenames)}")
         print(f"\tНайдено в {fetcher.name} = {link_count}")
-
+    error_lst = []
     threads: list[Thread] = get_threads(fetcher=fetcher, progress_bar=progress_bar, download_links=download_links,
-                                        output_filenames=output_filenames, pure_chapter_names=pure_chapter_names)
+                                        output_filenames=output_filenames, pure_chapter_names=pure_chapter_names,
+                                        er_lst=error_lst)
     for t in threads:
         t.start()
 
@@ -264,40 +267,91 @@ def download_manga(folder_prefix: str, progress_bar: Progress, fetcher: Abstract
                 break
         if t:
             fl = False
-    return None
+    if len(error_lst) > 0:
+        download_manga(folder_prefix, progress_bar, fetcher, download_manga_url, title_name)
+
+
+def manga_file_count(folder_prefix):
+    files = os.listdir(folder_prefix)
+    count = 0
+    for f in files:
+        # if f.endswith(".cbz"):
+        #     f = f.replace(".cbz", "")
+        # elif f.endswith(".cbr"):
+        #     f = f.replace(".cbr", "")
+        with ZipFile(os.path.join(folder_prefix, f), "r") as z:
+            namelist = z.namelist()
+            count += len(namelist)
+    return count
+
+
+def unzip_files(folder_prefix, power, merge_ext: str):
+    files = os.listdir(folder_prefix)
+    files.sort()
+    tmp_dir = os.path.join(folder_prefix, "tmp")
+    os.makedirs(tmp_dir, exist_ok=True)
+    i = 0
+    rez_file = os.path.join(folder_prefix, f'result{merge_ext}')
+    with ZipFile(rez_file, "w") as rez:
+        for f in files:
+            with ZipFile(os.path.join(folder_prefix, f), "r") as z:
+                for zf in z.namelist():
+                    ext = zf[zf.rfind("."):]
+                    filename = f'{i:0{power}}{ext}'
+                    filename = os.path.join(tmp_dir, filename)
+                    with open(filename, "wb") as tmp_pic:
+                        tmp_pic.write(z.read(zf))
+                    rez.write(filename=filename)
+                    os.remove(path=filename)
+                    i += 1
+    os.rmdir(tmp_dir)
+
+
+def merge_into_archive(folder_prefix: str, progress_bar: Progress, title_name: str, merge_ext: str):
+    count = manga_file_count(folder_prefix)
+    i = 1
+    p = 10
+    link_len = count
+    while p < link_len:
+        i += 1
+        p = p * 10
+
+    unzip_files(folder_prefix=folder_prefix, power=i, merge_ext=merge_ext)
 
 
 if __name__ == '__main__':
     fetchers: list[AbstractInfoFetcher] = [ComXLifeInfoFetcher(), MangaChanInfoFetcher()]
 
     argv_ = sys.argv
+
+    merge_mode = "--merge" in argv_
+    merge_arch_ext = '.cbz'
+    if merge_mode:
+        try:
+            merge_arch_ext = f'.{argv_[argv_.index("--merge") + 1]}'
+        except IndexError:
+            pass
+
     cur_fetcher = None
     title_name = None
     download_url = None
     mhub_url = None
-    if len(argv_) > 1:
-        while not title_name:
-            for fetcher in fetchers:
-                print(f"Поиск в {fetcher.name} ...")
-                title_name, download_url = search(fetcher, argv_[1:])
-                if title_name:
-                    print("Манга найдена!")
-                    cur_fetcher = fetcher
-                    break
-    else:
-        while not title_name:
-            print("Введите мангу для скачивания: ", end="", flush=True)
-            readline = sys.stdin.readline()
-            for fetcher in fetchers:
-                print(f"Поиск в {fetcher.name} ...")
-                title_name, download_url = search_mode(fetcher, title_name=readline)
-                if title_name:
-                    print("Манга найдена!")
-                    cur_fetcher = fetcher
-                    break
+    while not title_name:
+        print("Введите мангу для скачивания: ", end="", flush=True)
+        readline = sys.stdin.readline()
+        for fetcher in fetchers:
+            print(f"Поиск в {fetcher.name} ...")
+            title_name, download_url = search_mode(fetcher, title_name=readline)
+            if title_name:
+                print("Манга найдена!")
+                cur_fetcher = fetcher
+                break
 
     folder = os.path.join(".", "downloads", prepare_name(title_name))
     os.makedirs(name=folder, exist_ok=True)
     with Progress(expand=True) as p:
         download_manga(folder_prefix=str(folder), progress_bar=p, fetcher=cur_fetcher, download_manga_url=download_url,
                        title_name=title_name)
+        if merge_mode:
+            merge_into_archive(folder_prefix=str(folder), progress_bar=p, title_name=title_name,
+                               merge_ext=merge_arch_ext)
