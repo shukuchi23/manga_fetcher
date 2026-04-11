@@ -3,16 +3,17 @@ import pathlib
 import re
 import sys
 from threading import Thread
-from zipfile import ZipFile, BadZipFile
 
 import requests
 from bs4 import BeautifulSoup
-from rich.pretty import pretty_repr
 from rich.progress import Progress, TaskID
 
+import util
 from abstract_info_fetcher import AbstractInfoFetcher, MangaChanInfoFetcher, \
     ComXLifeInfoFetcher
 from chapter_fetcher import get_chapters
+from merger import merge_into_archive
+from util import get_max_power
 
 chapter_fetcher_name = "a.zazaza.me"
 
@@ -121,13 +122,7 @@ def get_pretty_chapter_names(url: str, folder_prefix: str = ""):
     for s in select:
         rez.insert(0, prepare_name(replace_html_trash_pattern.sub(repl="", string=s.text)))
 
-    i = 1
-    p = 10
-    link_len = len(rez)
-    while p < link_len:
-        i += 1
-        p = p * 10
-
+    i = get_max_power(size=len(rez))
     rez = [f'{folder_prefix}{j:0{i}}-{x}' for j, x in enumerate(rez)]
 
     return rez
@@ -199,10 +194,14 @@ def extract_num(line: str):
 def filter_exists(folder_prefix: str, chapter_names: list[str], pure_chapter_names: list[str],
                   download_links: list[str]):
     listdir = {file for file in os.listdir(folder_prefix)}
-    listdir = {extract_num(x): os.path.getsize(f'{"/".join(pathlib.Path(folder_prefix).parts)}/{x}') for x in listdir if x != 'tmp'}
+    listdir = {extract_num(x): os.path.getsize(f'{"/".join(pathlib.Path(folder_prefix).parts)}/{x}') for x in listdir if
+               x != 'tmp'}
     remove_chapters = []
     remove_links = []
     remove_pure_chapter_names = []
+    already_exists_in_archive = []
+    with open(os.path.join(folder_prefix, "chapter_list.txt"), "r") as ch_list:
+        already_exists_in_archive.append(ch_list.readline())
     need_print_new_chapter_manga = len(listdir) > 0
     for i, chapter_name in enumerate(chapter_names):
         finded_chapter = extract_num(chapter_name[chapter_name.index("Глава "):])
@@ -272,73 +271,6 @@ def download_manga(folder_prefix: str, progress_bar: Progress, fetcher: Abstract
         download_manga(folder_prefix, progress_bar, fetcher, download_manga_url, title_name)
 
 
-def manga_file_count(folder_prefix) -> tuple[list[str], int]:
-    files = os.listdir(folder_prefix)
-    count = 0
-    for f in files:
-        # if f.endswith(".cbz"):
-        #     f = f.replace(".cbz", "")
-        # elif f.endswith(".cbr"):
-        #     f = f.replace(".cbr", "")
-        try:
-            join = os.path.join(folder_prefix, f)
-            with ZipFile(join, "r") as z:
-                namelist = z.namelist()
-                count += len(namelist)
-        except BadZipFile as b:
-            print(f"error in {join}")
-    return files, count
-
-
-def merge(folder_prefix, power, merge_ext: str, progress_bar:Progress, files:list[str], title_name=None, task=None):
-    i = 0
-    rez_file = os.path.join(folder_prefix, f'{title_name}{merge_ext}')
-    # print(f"Создание результирующего файла: {rez_file}")
-    with ZipFile(rez_file, "w") as rez:
-        # print("Файл создан")
-        for f in files:
-            if not f.endswith(".cbz") and not f.endswith(".cbx") and not f.endswith("cbr") and not f.endswith(".rar") and not f.endswith(".zip"):
-                print(f"Пропуск {f}")
-                continue
-            merge_filename = str(os.path.join(folder_prefix, f))
-            # print(f"обрабатывается архив: {merge_filename}")
-            with ZipFile(file=merge_filename, mode="r") as z:
-                for zf in z.namelist():
-                    ext = zf[zf.rfind("."):]
-                    filename = f'{i:0{power}}{ext}'
-                    filename = os.path.join(folder_prefix, filename)
-                    # print(f"Взят файл {filename}")
-                    with open(filename, "wb") as tmp_pic:
-                        tmp_pic.write(z.read(zf))
-                    # print(f"Разархивирован файл {filename}")
-                    rez.write(filename=filename)
-                    # print(f"файл добавлен в архив {merge_filename}")
-                    os.remove(path=filename)
-                    # print(f"файл удален {filename}")
-                    i += 1
-            progress_bar.advance(task, 1)
-    # os.rmdir(tmp_dir)
-    return rez_file
-
-
-def merge_into_archive(folder_prefix: str, progress_bar: Progress, title_name: str, merge_ext: str):
-    archive_list, page_count = manga_file_count(folder_prefix)
-    archive_list.sort()
-    i = 1
-    p = 10
-    link_len = page_count
-    while p < link_len:
-        i += 1
-        p = p * 10
-    task = progress_bar.add_task(description="Архивация в единый файл...", total=len(archive_list))
-    # task = None
-    print("Архивация...")
-    filename = merge(folder_prefix=folder_prefix, power=i, progress_bar=progress_bar, merge_ext=merge_ext, files=archive_list, title_name=title_name, task=task)
-    # archive_list = [os.path.join(folder_prefix, x) for x in archive_list]
-    # for arch in archive_list:
-    #     os.remove(arch)
-
-
 if __name__ == '__main__':
     fetchers: list[AbstractInfoFetcher] = [ComXLifeInfoFetcher(), MangaChanInfoFetcher()]
 
@@ -367,7 +299,7 @@ if __name__ == '__main__':
                 cur_fetcher = fetcher
                 break
 
-    folder = os.path.join(".", "downloads", prepare_name(title_name))
+    folder = os.path.join(".", "downloads", util.construct_path_to_download(prepare_name(title_name)))
     os.makedirs(name=folder, exist_ok=True)
     with Progress(expand=True) as p:
         download_manga(folder_prefix=str(folder), progress_bar=p, fetcher=cur_fetcher, download_manga_url=download_url,
