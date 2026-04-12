@@ -188,24 +188,24 @@ def get_threads(fetcher: AbstractInfoFetcher, progress_bar: Progress, download_l
 def extract_num(line: str):
     index = line.index(".")
     num = line[6:index]
-    return num
+    return int(num)
 
 
 def filter_exists(folder_prefix: str, chapter_names: list[str], pure_chapter_names: list[str],
-                  download_links: list[str]):
-    listdir = {file for file in os.listdir(folder_prefix)}
-    listdir = {extract_num(x): os.path.getsize(f'{"/".join(pathlib.Path(folder_prefix).parts)}/{x}') for x in listdir if
-               x != 'tmp'}
+                  download_links: list[str], already_exists: list[str]):
+    if not already_exists:
+        already_exists = {file for file in os.listdir(folder_prefix)}
+        already_exists = {extract_num(x) for x in already_exists if
+                          x != 'tmp' and not x.startswith(util.chapter_list_filename)}
+    else:
+        already_exists = {extract_num(x) for x in already_exists if x != "tmp"}
     remove_chapters = []
     remove_links = []
     remove_pure_chapter_names = []
-    already_exists_in_archive = []
-    with open(os.path.join(folder_prefix, "chapter_list.txt"), "r") as ch_list:
-        already_exists_in_archive.append(ch_list.readline())
-    need_print_new_chapter_manga = len(listdir) > 0
+    need_print_new_chapter_manga = len(already_exists) > 0
     for i, chapter_name in enumerate(chapter_names):
         finded_chapter = extract_num(chapter_name[chapter_name.index("Глава "):])
-        if finded_chapter not in listdir or listdir[finded_chapter] < 8192:
+        if finded_chapter not in already_exists:
             if need_print_new_chapter_manga:
                 print(f"Найдена новая  манга: {pure_chapter_names[i]}")
         else:
@@ -221,18 +221,22 @@ def filter_exists(folder_prefix: str, chapter_names: list[str], pure_chapter_nam
 
 
 def download_manga(folder_prefix: str, progress_bar: Progress, fetcher: AbstractInfoFetcher, download_manga_url: str,
-                   title_name: str):
+                   title_name: str, is_delta=False, is_onefile_mode=True):
     download_links = fetcher.get_download_links(title_url=download_manga_url)
     pure_chapter_names = get_chapters(title_name=title_name, dirty_len=len(download_links))
+    info = util.read_chapter_info(title_name)
     output_filenames = None
     if folder_prefix:
         output_filenames = [os.path.join(folder_prefix, prepare_name(x)) for x in pure_chapter_names]
     link_count = len(download_links)
+    log_files = pure_chapter_names.copy()
     filter_exists(folder_prefix=folder_prefix, chapter_names=output_filenames, pure_chapter_names=pure_chapter_names,
-                  download_links=download_links)
+                  download_links=download_links, already_exists=info)
     if len(download_links) == 0 and len(download_links) != link_count:
         print(f"Манга '{title_name} полностью скачана'")
-        return None
+        if not info:
+            util.append_chapter_list(title_name=title_name, n_chapters=log_files, add_new_file=False)
+        return []
 
     print("[Данные о главах]")
     chapters_count = len(output_filenames)
@@ -242,12 +246,13 @@ def download_manga(folder_prefix: str, progress_bar: Progress, fetcher: Abstract
         print(f"\tНайдено в {fetcher.name} = {link_count}")
         exit(1)
     elif chapters_count != link_count:
-        min_size = min(chapters_count, link_count)
-        print(f"\tНайдено в {chapter_fetcher_name} = {len(output_filenames)}")
-        print(f"\tНайдено в {fetcher.name} = {link_count}")
-        # print(f"Будет скачано минимально возможное кол.-во глав: {min_size}")
-        output_filenames = output_filenames[:min_size]
-        download_links = download_links[:min_size]
+        if chapters_count != len(download_links):
+            min_size = min(chapters_count, link_count)
+            print(f"\tНайдено в {chapter_fetcher_name} = {len(output_filenames)}")
+            print(f"\tНайдено в {fetcher.name} = {link_count}")
+            # print(f"Будет скачано минимально возможное кол.-во глав: {min_size}")
+            output_filenames = output_filenames[:min_size]
+            download_links = download_links[:min_size]
     else:
         print(f"\tНайдено в manga_hub = {len(output_filenames)}")
         print(f"\tНайдено в {fetcher.name} = {link_count}")
@@ -268,19 +273,23 @@ def download_manga(folder_prefix: str, progress_bar: Progress, fetcher: Abstract
         if t:
             fl = False
     if len(error_lst) > 0:
+        print('Повторное скачивание...')
         download_manga(folder_prefix, progress_bar, fetcher, download_manga_url, title_name)
+    util.append_chapter_list(title_name=title_name, n_chapters=pure_chapter_names, add_new_file=not is_onefile_mode)
+    return pure_chapter_names
 
 
 if __name__ == '__main__':
     fetchers: list[AbstractInfoFetcher] = [ComXLifeInfoFetcher(), MangaChanInfoFetcher()]
 
     argv_ = sys.argv
-
-    merge_mode = "--merge" in argv_
+    is_onefile_mode = "--onefile" in argv_
+    is_delta_mode = "--delta" in argv_
+    ext_flag = "-e" in argv_
     merge_arch_ext = '.cbz'
-    if merge_mode:
+    if ext_flag:
         try:
-            merge_arch_ext = f'.{argv_[argv_.index("--merge") + 1]}'
+            merge_arch_ext = f'.{argv_[argv_.index("-e") + 1]}'
         except IndexError:
             pass
 
@@ -299,11 +308,16 @@ if __name__ == '__main__':
                 cur_fetcher = fetcher
                 break
 
-    folder = os.path.join(".", "downloads", util.construct_path_to_download(prepare_name(title_name)))
+    title_name = prepare_name(title_name)
+    folder = util.construct_path_to_download(title_name)
     os.makedirs(name=folder, exist_ok=True)
     with Progress(expand=True) as p:
-        download_manga(folder_prefix=str(folder), progress_bar=p, fetcher=cur_fetcher, download_manga_url=download_url,
-                       title_name=title_name)
-        if merge_mode:
-            merge_into_archive(folder_prefix=str(folder), progress_bar=p, title_name=title_name,
-                               merge_ext=merge_arch_ext)
+        downloaded_chapters = download_manga(folder_prefix=str(folder), progress_bar=p, fetcher=cur_fetcher,
+                               download_manga_url=download_url, title_name=title_name, is_delta=is_delta_mode,
+                               is_onefile_mode=is_onefile_mode)
+        if is_onefile_mode:
+            archive = merge_into_archive(folder_prefix=str(folder), title_name=title_name, merge_ext=merge_arch_ext,
+                                         progress_bar=p)
+        elif is_delta_mode:
+            merge_into_archive(folder_prefix=str(folder), progress_bar=p, title_name=title_name, merge_ext=merge_arch_ext, files=downloaded_chapters, delta=True)
+        util.append_chapter_list(title_name=title_name, n_chapters=downloaded_chapters, add_new_file=is_onefile_mode)

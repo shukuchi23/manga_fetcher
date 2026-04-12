@@ -31,8 +31,8 @@ def read_chapter_info(title_name: str):
     try:
         listdir = get_all_chapter_list_files(title_name)
         for f in listdir:
-            with open(os.path.join(title_download_folder, f), "r") as ch_l:
-                rez.append(ch_l.readline().replace("\n", ""))
+            with open(os.path.join(title_download_folder, f), "r", encoding="utf-8") as ch_l:
+                rez.extend([x.replace("\n", "") for x in  ch_l.readlines() if x])
     except:
         pass
     return rez
@@ -43,6 +43,8 @@ def append_chapter_list(title_name: str, n_chapters: list[str], add_new_file: bo
     download = construct_path_to_download(title_name)
     file_name = os.path.join(download,
                              f'{chapter_list_filename}.txt' if not add_new_file else f'{chapter_list_filename}{len(list_of_ch_list)}.txt')
-    with open(file=file_name, mode="a") as f:
+    print("Добавление файла о главах...")
+    with open(file=file_name, mode="a", encoding="utf-8") as f:
         for ch in n_chapters:
             f.write(f'{ch}\n')
+    print(f'Файл {file_name} добавлен')
