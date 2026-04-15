@@ -32,7 +32,7 @@ def read_chapter_info(title_name: str):
         listdir = get_all_chapter_list_files(title_name)
         for f in listdir:
             with open(os.path.join(title_download_folder, f), "r", encoding="utf-8") as ch_l:
-                rez.extend([x.replace("\n", "") for x in  ch_l.readlines() if x])
+                rez.extend([x.replace("\n", "") for x in ch_l.readlines() if x])
     except:
         pass
     return rez

@@ -1,6 +1,5 @@
 import os
 import sys
-from codecs import replace_errors
 from zipfile import ZipFile, BadZipFile
 
 from rich.progress import Progress
@@ -59,7 +58,7 @@ def merge(folder_prefix, power, rez_file_name: str, files: list[str], progress_b
 
 
 def merge_into_archive(folder_prefix: str, title_name: str, merge_ext: str, progress_bar: Progress = None,
-                       onefile=False, files=[], delta=False):
+                       onefile=False, files=[], delta=False, rez_file_name: str = None):
     file_and_pages = manga_file_count(folder_prefix, files)
     archive_list = [f for f in file_and_pages.keys()]
     page_count = 0
@@ -77,9 +76,11 @@ def merge_into_archive(folder_prefix: str, title_name: str, merge_ext: str, prog
     else:
         num = len(util.get_all_chapter_list_files(title_name)) - 1
 
-    rez_file_name = f'{title_name}{num}{merge_ext}'
+    if not rez_file_name:
+        rez_file_name = f'{title_name}{num}{merge_ext}'
+
     start_page = 0
-    if onefile and  rez_file_name in file_and_pages:
+    if onefile and rez_file_name in file_and_pages:
         start_page = file_and_pages[rez_file_name] + 1
 
     archive_list = [f for f in archive_list if only_archive_pred(f) and f != rez_file_name]
@@ -95,7 +96,24 @@ def merge_into_archive(folder_prefix: str, title_name: str, merge_ext: str, prog
     return archive_list
 
 
+def create_delta(folder_prefix: str, title_name: str, merge_ext: str, progress_bar: Progress = None,
+                 files: list[str] = []):
+    download = util.construct_path_to_download(title_name)
+    delta_filename_prefix_len = 32
+    zip_name = title_name[:delta_filename_prefix_len].strip()
+    already_downloaded = [x for x in os.listdir(download) if x.startswith(zip_name) and only_archive_pred(x)]
+    count_ad = len(already_downloaded)
+    if count_ad > 0:
+        last_arch = already_downloaded[-1]
+        os.rename(src=os.path.join(folder_prefix, last_arch),
+                  dst=os.path.join(folder_prefix, last_arch.replace("_new", "")))
+    result_name = f'{zip_name}{count_ad:03}_new{merge_ext}'
+    merge_into_archive(folder_prefix=folder_prefix, title_name=title_name, merge_ext=merge_ext,
+                       progress_bar=progress_bar,
+                       files=files, rez_file_name=result_name, delta=True)
+    print(f'Все новые главы доступны в файле {result_name}')
+
+
 if __name__ == '__main__':
     argv_ = sys.argv[1]
     join = os.path.join(".", "downloads", argv_)
-    merge_into_archive(folder_prefix=join, title_name=argv_, merge_ext=".cbz", onefile=True)

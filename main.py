@@ -8,11 +8,11 @@ import requests
 from bs4 import BeautifulSoup
 from rich.progress import Progress, TaskID
 
+import merger
 import util
 from abstract_info_fetcher import AbstractInfoFetcher, MangaChanInfoFetcher, \
     ComXLifeInfoFetcher
 from chapter_fetcher import get_chapters
-from merger import merge_into_archive
 from util import get_max_power
 
 chapter_fetcher_name = "a.zazaza.me"
@@ -221,7 +221,7 @@ def filter_exists(folder_prefix: str, chapter_names: list[str], pure_chapter_nam
 
 
 def download_manga(folder_prefix: str, progress_bar: Progress, fetcher: AbstractInfoFetcher, download_manga_url: str,
-                   title_name: str, is_delta=False, is_onefile_mode=True):
+                   title_name: str):
     download_links = fetcher.get_download_links(title_url=download_manga_url)
     pure_chapter_names = get_chapters(title_name=title_name, dirty_len=len(download_links))
     info = util.read_chapter_info(title_name)
@@ -275,18 +275,27 @@ def download_manga(folder_prefix: str, progress_bar: Progress, fetcher: Abstract
     if len(error_lst) > 0:
         print('Повторное скачивание...')
         download_manga(folder_prefix, progress_bar, fetcher, download_manga_url, title_name)
-    util.append_chapter_list(title_name=title_name, n_chapters=pure_chapter_names, add_new_file=not is_onefile_mode)
     return pure_chapter_names
 
 
-if __name__ == '__main__':
-    fetchers: list[AbstractInfoFetcher] = [ComXLifeInfoFetcher(), MangaChanInfoFetcher()]
+def help():
+    print("""
+     Usage: main.py [OPTION]... 
+     Flags: 
+     \t-e <расширение файла с мангой> (доступны: cbz, cbr, rar, zip; По умолчанию - cbz)
+    """, flush=True)
 
+
+if __name__ == '__main__':
     argv_ = sys.argv
-    is_onefile_mode = "--onefile" in argv_
-    is_delta_mode = "--delta" in argv_
+    is_delta_mode = True
     ext_flag = "-e" in argv_
     merge_arch_ext = '.cbz'
+    if "--help" in argv_ or "-help" in argv_:
+        help()
+        exit(0)
+
+    fetchers: list[AbstractInfoFetcher] = [ComXLifeInfoFetcher(), MangaChanInfoFetcher()]
     if ext_flag:
         try:
             merge_arch_ext = f'.{argv_[argv_.index("-e") + 1]}'
@@ -313,11 +322,8 @@ if __name__ == '__main__':
     os.makedirs(name=folder, exist_ok=True)
     with Progress(expand=True) as p:
         downloaded_chapters = download_manga(folder_prefix=str(folder), progress_bar=p, fetcher=cur_fetcher,
-                               download_manga_url=download_url, title_name=title_name, is_delta=is_delta_mode,
-                               is_onefile_mode=is_onefile_mode)
-        if is_onefile_mode:
-            archive = merge_into_archive(folder_prefix=str(folder), title_name=title_name, merge_ext=merge_arch_ext,
-                                         progress_bar=p)
-        elif is_delta_mode:
-            merge_into_archive(folder_prefix=str(folder), progress_bar=p, title_name=title_name, merge_ext=merge_arch_ext, files=downloaded_chapters, delta=True)
-        util.append_chapter_list(title_name=title_name, n_chapters=downloaded_chapters, add_new_file=is_onefile_mode)
+                                             download_manga_url=download_url, title_name=title_name)
+        if downloaded_chapters:
+            merger.create_delta(folder_prefix=str(folder), progress_bar=p, title_name=title_name,
+                                merge_ext=merge_arch_ext, files=downloaded_chapters)
+            util.append_chapter_list(title_name=title_name, n_chapters=downloaded_chapters)
