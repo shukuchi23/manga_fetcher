@@ -58,7 +58,7 @@ def merge(folder_prefix, power, rez_file_name: str, files: list[str], progress_b
 
 
 def merge_into_archive(folder_prefix: str, title_name: str, merge_ext: str, progress_bar: Progress = None,
-                       onefile=False, files=[], delta=False, rez_file_name: str = None):
+                       onefile=False, files=[], delta=False, rez_file_name: str = None, task_id: int = None):
     file_and_pages = manga_file_count(folder_prefix, files)
     archive_list = [f for f in file_and_pages.keys()]
     page_count = 0
@@ -66,10 +66,6 @@ def merge_into_archive(folder_prefix: str, title_name: str, merge_ext: str, prog
         page_count += x
 
     archive_list.sort()
-    print("Архивация...")
-    task_id = None
-    if progress_bar:
-        task_id = progress_bar.add_task(description="Архивация", )
 
     if onefile:
         num = ""
@@ -91,27 +87,47 @@ def merge_into_archive(folder_prefix: str, title_name: str, merge_ext: str, prog
                            files=archive_list, progress_bar=progress_bar, task_id=task_id, start_page=start_page)
     if can_delete_tmp and (onefile or delta):
         archive_list = [os.path.join(folder_prefix, x) for x in archive_list]
+        task = progress_bar.add_task("Зачистка временных файлов", total=len(archive_list))
         for arch in archive_list:
             os.remove(arch)
+            progress_bar.advance(task, 1)
+
     return archive_list
 
 
 def create_delta(folder_prefix: str, title_name: str, merge_ext: str, progress_bar: Progress = None,
-                 files: list[str] = []):
+                 files: list[str] = [], chapter_in_arch_limit: int = 100):
     download = util.construct_path_to_download(title_name)
     delta_filename_prefix_len = 32
     zip_name = title_name[:delta_filename_prefix_len].strip()
     already_downloaded = [x for x in os.listdir(download) if x.startswith(zip_name) and only_archive_pred(x)]
     count_ad = len(already_downloaded)
     if count_ad > 0:
-        last_arch = already_downloaded[-1]
-        os.rename(src=os.path.join(folder_prefix, last_arch),
-                  dst=os.path.join(folder_prefix, last_arch.replace("_new", "")))
-    result_name = f'{zip_name}{count_ad:03}_new{merge_ext}'
-    merge_into_archive(folder_prefix=folder_prefix, title_name=title_name, merge_ext=merge_ext,
-                       progress_bar=progress_bar,
-                       files=files, rez_file_name=result_name, delta=True)
-    print(f'Все новые главы доступны в файле {result_name}')
+        for last_arch in already_downloaded:
+            os.rename(src=os.path.join(folder_prefix, last_arch),
+                      dst=os.path.join(folder_prefix, last_arch.replace("_new", "")))
+    input_shit = {}
+    ch_size = len(files)
+    while ch_size > 0:
+        shift = min(chapter_in_arch_limit, ch_size)
+        input_shit[f'{zip_name}{count_ad:03}_new{merge_ext}'] = files[:shift]
+        count_ad += 1
+        files = files[shift:]
+        ch_size -= shift
+
+    result_names = [x for x in input_shit]
+    result_names.sort()
+    archive_task = progress_bar.add_task("Архивация", total=len(result_names))
+    for rn in result_names:
+        merge_into_archive(folder_prefix=folder_prefix, title_name=title_name, merge_ext=merge_ext,
+                           progress_bar=progress_bar,
+                           files=input_shit[rn], rez_file_name=rn, delta=True,
+                           task_id=progress_bar.add_task(description=rn, total=len(input_shit[rn])))
+        progress_bar.advance(archive_task, 1)
+    if len(result_names) == 1:
+        print(f'Все новые главы доступны в файле "{result_names[0]}"')
+    elif len(result_names) > 1:
+        print(f'Все новые главы доступны в файлах "{'\n'.join(result_names)}"')
 
 
 if __name__ == '__main__':

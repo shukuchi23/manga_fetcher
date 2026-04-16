@@ -199,9 +199,23 @@ def filter_exists(folder_prefix: str, chapter_names: list[str], pure_chapter_nam
                           x != 'tmp' and not x.startswith(util.chapter_list_filename)}
     else:
         already_exists = {extract_num(x) for x in already_exists if x != "tmp"}
+
     remove_chapters = []
     remove_links = []
     remove_pure_chapter_names = []
+    for i in already_exists:
+        remove_chapters.append(chapter_names[i])
+        remove_links.append(download_links[i])
+        remove_pure_chapter_names.append(pure_chapter_names[i])
+
+    for ch, pch, rlink in zip(remove_chapters, remove_pure_chapter_names, remove_links):
+        chapter_names.remove(ch)
+        pure_chapter_names.remove(pch)
+        download_links.remove(rlink)
+    remove_links.clear()
+    remove_chapters.clear()
+    remove_pure_chapter_names.clear()
+
     need_print_new_chapter_manga = len(already_exists) > 0
     for i, chapter_name in enumerate(chapter_names):
         finded_chapter = extract_num(chapter_name[chapter_name.index("Глава "):])
@@ -325,5 +339,5 @@ if __name__ == '__main__':
                                              download_manga_url=download_url, title_name=title_name)
         if downloaded_chapters:
             merger.create_delta(folder_prefix=str(folder), progress_bar=p, title_name=title_name,
-                                merge_ext=merge_arch_ext, files=downloaded_chapters)
+                                merge_ext=merge_arch_ext, files=[prepare_name(x) for x in downloaded_chapters])
             util.append_chapter_list(title_name=title_name, n_chapters=downloaded_chapters)

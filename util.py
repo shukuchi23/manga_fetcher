@@ -1,5 +1,7 @@
 import os.path
 
+from rich.progress import Progress
+
 
 def get_max_power(size: int, base: int = 10):
     i = 1
@@ -38,13 +40,19 @@ def read_chapter_info(title_name: str):
     return rez
 
 
-def append_chapter_list(title_name: str, n_chapters: list[str], add_new_file: bool = False):
+def append_chapter_list(title_name: str, n_chapters: list[str], progress_bar: Progress = None,
+                        add_new_file: bool = False):
     list_of_ch_list = get_all_chapter_list_files(title_name)
     download = construct_path_to_download(title_name)
     file_name = os.path.join(download,
                              f'{chapter_list_filename}.txt' if not add_new_file else f'{chapter_list_filename}{len(list_of_ch_list)}.txt')
-    print("Добавление файла о главах...")
     with open(file=file_name, mode="a", encoding="utf-8") as f:
-        for ch in n_chapters:
-            f.write(f'{ch}\n')
-    print(f'Файл {file_name} добавлен')
+        size = len(n_chapters)
+        task_id = None
+        if size > 0:
+            if progress_bar:
+                task_id = progress_bar.add_task("Обновление chapter_list.txt", total=size)
+            for ch in n_chapters:
+                f.write(f'{ch}\n')
+                if progress_bar:
+                    progress_bar.advance(task_id, 1)
