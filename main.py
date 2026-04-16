@@ -297,6 +297,7 @@ def help():
      Usage: main.py [OPTION]... 
      Flags: 
      \t-e <расширение файла с мангой> (доступны: cbz, cbr, rar, zip; По умолчанию - cbz)
+     \t-l <Число глав в одном архиве> (по умолчанию 100)
     """, flush=True)
 
 
@@ -338,6 +339,13 @@ if __name__ == '__main__':
         downloaded_chapters = download_manga(folder_prefix=str(folder), progress_bar=p, fetcher=cur_fetcher,
                                              download_manga_url=download_url, title_name=title_name)
         if downloaded_chapters:
+            ch_limit = 100
+            if "-l" in argv_:
+                ch_limit = int(argv_[argv_.index("-l") + 1].strip())
+            if ch_limit <= 0:
+                ch_limit = 100
+
             merger.create_delta(folder_prefix=str(folder), progress_bar=p, title_name=title_name,
-                                merge_ext=merge_arch_ext, files=[prepare_name(x) for x in downloaded_chapters])
+                                merge_ext=merge_arch_ext, files=[prepare_name(x) for x in downloaded_chapters],
+                                chapter_in_arch_limit=ch_limit)
             util.append_chapter_list(title_name=title_name, n_chapters=downloaded_chapters)
