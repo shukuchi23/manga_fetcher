@@ -195,7 +195,8 @@ class MangaChanInfoFetcher(AbstractInfoFetcher):
 class ComXLifeInfoFetcher(AbstractInfoFetcher):
 
     def __init__(self):
-        super().__init__("https://com-x.life", "https://com-x.life/search/", "com-x.life")
+        base_url = "https://ru.com-x.life/"
+        super().__init__(base_url,  f"{base_url}/search", "com-x.life")
         self.__header = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             "Referer": f"{self.base_url}/main",
